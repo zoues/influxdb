@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/influxdata/influxdb"
 	"github.com/influxdata/influxdb/coordinator"
+	"github.com/influxdata/influxdb/debug"
 	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/monitor"
@@ -75,7 +77,8 @@ type Server struct {
 	// These references are required for the tcp muxer.
 	SnapshotterService *snapshotter.Service
 
-	Monitor *monitor.Monitor
+	Monitor  *monitor.Monitor
+	DebugMux http.Handler
 
 	// Server reporting and registration
 	reportingDisabled bool
@@ -199,6 +202,10 @@ func NewServer(c *Config, buildInfo *BuildInfo) (*Server, error) {
 	s.Monitor.Branch = s.buildInfo.Branch
 	s.Monitor.BuildTime = s.buildInfo.Time
 	s.Monitor.PointsWriter = (*monitorPointsWriter)(s.PointsWriter)
+
+	// Initialize the debug mux.
+	s.DebugMux = debug.NewMux(s.Monitor)
+
 	return s, nil
 }
 
@@ -263,7 +270,7 @@ func (s *Server) appendHTTPDService(c httpd.Config) {
 	srv.Handler.QueryAuthorizer = meta.NewQueryAuthorizer(s.MetaClient)
 	srv.Handler.WriteAuthorizer = meta.NewWriteAuthorizer(s.MetaClient)
 	srv.Handler.QueryExecutor = s.QueryExecutor
-	srv.Handler.Monitor = s.Monitor
+	srv.Handler.DebugMux = s.DebugMux
 	srv.Handler.PointsWriter = s.PointsWriter
 	srv.Handler.Version = s.buildInfo.Version
 

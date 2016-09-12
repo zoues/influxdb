@@ -9,10 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"runtime/debug"
-	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,7 +21,6 @@ import (
 	"github.com/influxdata/influxdb"
 	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/monitor"
 	"github.com/influxdata/influxdb/services/continuous_querier"
 	"github.com/influxdata/influxdb/services/meta"
 	"github.com/influxdata/influxdb/uuid"
@@ -80,15 +77,13 @@ type Handler struct {
 
 	QueryExecutor *influxql.QueryExecutor
 
-	Monitor interface {
-		Statistics(tags map[string]string) ([]*monitor.Statistic, error)
-	}
-
 	PointsWriter interface {
 		WritePoints(database, retentionPolicy string, consistencyLevel models.ConsistencyLevel, points []models.Point) error
 	}
 
 	ContinuousQuerier continuous_querier.ContinuousQuerier
+
+	DebugMux http.Handler
 
 	Config    *Config
 	Logger    *log.Logger
@@ -244,20 +239,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Add version header to all InfluxDB requests.
 	w.Header().Add("X-Influxdb-Version", h.Version)
 
-	// FIXME(benbjohnson): Add pprof enabled flag.
-	if strings.HasPrefix(r.URL.Path, "/debug/pprof") {
-		switch r.URL.Path {
-		case "/debug/pprof/cmdline":
-			pprof.Cmdline(w, r)
-		case "/debug/pprof/profile":
-			pprof.Profile(w, r)
-		case "/debug/pprof/symbol":
-			pprof.Symbol(w, r)
-		default:
-			pprof.Index(w, r)
-		}
-	} else if strings.HasPrefix(r.URL.Path, "/debug/vars") {
-		h.serveExpvar(w, r)
+	if h.DebugMux != nil && strings.HasPrefix(r.URL.Path, "/debug/") {
+		h.DebugMux.ServeHTTP(h.countErrors(w), r)
 	} else {
 		h.mux.ServeHTTP(w, r)
 	}
@@ -729,73 +712,6 @@ func convertToEpoch(r *influxql.Result, epoch string) {
 	}
 }
 
-// serveExpvar serves internal metrics in /debug/vars format over HTTP.
-func (h *Handler) serveExpvar(w http.ResponseWriter, r *http.Request) {
-	// Retrieve statistics from the monitor.
-	stats, err := h.Monitor.Statistics(nil)
-	if err != nil {
-		h.httpError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	m := make(map[string]*monitor.Statistic)
-	for _, s := range stats {
-		// Very hackily create a unique key.
-		buf := bytes.NewBufferString(s.Name)
-		if path, ok := s.Tags["path"]; ok {
-			fmt.Fprintf(buf, ":%s", path)
-			if id, ok := s.Tags["id"]; ok {
-				fmt.Fprintf(buf, ":%s", id)
-			}
-		} else if bind, ok := s.Tags["bind"]; ok {
-			if proto, ok := s.Tags["proto"]; ok {
-				fmt.Fprintf(buf, ":%s", proto)
-			}
-			fmt.Fprintf(buf, ":%s", bind)
-		} else if database, ok := s.Tags["database"]; ok {
-			fmt.Fprintf(buf, ":%s", database)
-			if rp, ok := s.Tags["retention_policy"]; ok {
-				fmt.Fprintf(buf, ":%s", rp)
-				if name, ok := s.Tags["name"]; ok {
-					fmt.Fprintf(buf, ":%s", name)
-				}
-				if dest, ok := s.Tags["destination"]; ok {
-					fmt.Fprintf(buf, ":%s", dest)
-				}
-			}
-		}
-		key := buf.String()
-
-		m[key] = s
-	}
-
-	// Sort the keys to simulate /debug/vars output.
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	fmt.Fprintln(w, "{")
-	first := true
-	for _, key := range keys {
-		// Marshal this statistic to JSON.
-		out, err := json.Marshal(m[key])
-		if err != nil {
-			continue
-		}
-
-		if !first {
-			fmt.Fprintln(w, ",")
-		}
-		first = false
-		fmt.Fprintf(w, "%q: ", key)
-		w.Write(bytes.TrimSpace(out))
-	}
-	fmt.Fprintln(w, "\n}")
-}
-
 // h.httpError writes an error to the client in a standard format.
 func (h *Handler) httpError(w http.ResponseWriter, error string, code int) {
 	if code == http.StatusUnauthorized {
@@ -1102,6 +1018,27 @@ func (h *Handler) recovery(inner http.Handler, name string) http.Handler {
 
 		inner.ServeHTTP(l, r)
 	})
+}
+
+// countErrors returns a wrapped ResponseWriter that counts HTTP errors toward stats.
+func (h *Handler) countErrors(w http.ResponseWriter) http.ResponseWriter {
+	return &countErrorsResponseWriter{
+		ResponseWriter: w,
+		h:              h,
+	}
+}
+
+// countErrorsResponseWriter wraps a http.ResponseWriter so that WriteHeader
+// counts toward stats for errors.
+type countErrorsResponseWriter struct {
+	http.ResponseWriter
+
+	h *Handler
+}
+
+// WriteHeader writes the given header and records relevant stats.
+func (w *countErrorsResponseWriter) WriteHeader(code int) {
+	w.h.writeHeader(w.ResponseWriter, code)
 }
 
 // Response represents a list of statement results.
