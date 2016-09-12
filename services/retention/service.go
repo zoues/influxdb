@@ -23,8 +23,13 @@ type Service struct {
 
 	enabled       bool
 	checkInterval time.Duration
-	wg            sync.WaitGroup
-	done          chan struct{}
+
+	// Channels only used when building with debug tag.
+	forceDeleteShardGroups chan struct{}
+	forceDeleteShards      chan struct{}
+
+	wg   sync.WaitGroup
+	done chan struct{}
 
 	logger *log.Logger
 }
@@ -35,6 +40,9 @@ func NewService(c Config) *Service {
 		checkInterval: time.Duration(c.CheckInterval),
 		done:          make(chan struct{}),
 		logger:        log.New(os.Stderr, "[retention] ", log.LstdFlags),
+
+		forceDeleteShardGroups: make(chan struct{}),
+		forceDeleteShards:      make(chan struct{}),
 	}
 }
 
@@ -42,8 +50,8 @@ func NewService(c Config) *Service {
 func (s *Service) Open() error {
 	s.logger.Println("Starting retention policy enforcement service with check interval of", s.checkInterval)
 	s.wg.Add(2)
-	go s.deleteShardGroups()
-	go s.deleteShards()
+	go s.serviceDeleteShardGroups()
+	go s.serviceDeleteShards()
 	return nil
 }
 
@@ -61,75 +69,85 @@ func (s *Service) SetLogOutput(w io.Writer) {
 	s.logger = log.New(w, "[retention] ", log.LstdFlags)
 }
 
-func (s *Service) deleteShardGroups() {
+func (s *Service) serviceDeleteShardGroups() {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(s.checkInterval)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-s.forceDeleteShardGroups:
+			s.deleteShardGroups()
+		case <-ticker.C:
+			s.deleteShardGroups()
 		case <-s.done:
 			return
+		}
+	}
+}
 
-		case <-ticker.C:
-			dbs := s.MetaClient.Databases()
-			for _, d := range dbs {
-				for _, r := range d.RetentionPolicies {
-					for _, g := range r.ExpiredShardGroups(time.Now().UTC()) {
-						if err := s.MetaClient.DeleteShardGroup(d.Name, r.Name, g.ID); err != nil {
-							s.logger.Printf("failed to delete shard group %d from database %s, retention policy %s: %s",
-								g.ID, d.Name, r.Name, err.Error())
-						} else {
-							s.logger.Printf("deleted shard group %d from database %s, retention policy %s",
-								g.ID, d.Name, r.Name)
-						}
-					}
+func (s *Service) deleteShardGroups() {
+	dbs := s.MetaClient.Databases()
+	for _, d := range dbs {
+		for _, r := range d.RetentionPolicies {
+			for _, g := range r.ExpiredShardGroups(time.Now().UTC()) {
+				if err := s.MetaClient.DeleteShardGroup(d.Name, r.Name, g.ID); err != nil {
+					s.logger.Printf("failed to delete shard group %d from database %s, retention policy %s: %s",
+						g.ID, d.Name, r.Name, err.Error())
+				} else {
+					s.logger.Printf("deleted shard group %d from database %s, retention policy %s",
+						g.ID, d.Name, r.Name)
 				}
 			}
 		}
 	}
 }
 
-func (s *Service) deleteShards() {
+func (s *Service) serviceDeleteShards() {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(s.checkInterval)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-s.forceDeleteShards:
+			s.deleteShards()
+		case <-ticker.C:
+			s.deleteShards()
 		case <-s.done:
 			return
+		}
+	}
+}
 
-		case <-ticker.C:
-			s.logger.Println("retention policy shard deletion check commencing")
+func (s *Service) deleteShards() {
+	s.logger.Println("retention policy shard deletion check commencing")
 
-			type deletionInfo struct {
-				db string
-				rp string
-			}
-			deletedShardIDs := make(map[uint64]deletionInfo, 0)
-			dbs := s.MetaClient.Databases()
-			for _, d := range dbs {
-				for _, r := range d.RetentionPolicies {
-					for _, g := range r.DeletedShardGroups() {
-						for _, sh := range g.Shards {
-							deletedShardIDs[sh.ID] = deletionInfo{db: d.Name, rp: r.Name}
-						}
-					}
+	type deletionInfo struct {
+		db string
+		rp string
+	}
+	deletedShardIDs := make(map[uint64]deletionInfo, 0)
+	dbs := s.MetaClient.Databases()
+	for _, d := range dbs {
+		for _, r := range d.RetentionPolicies {
+			for _, g := range r.DeletedShardGroups() {
+				for _, sh := range g.Shards {
+					deletedShardIDs[sh.ID] = deletionInfo{db: d.Name, rp: r.Name}
 				}
 			}
+		}
+	}
 
-			for _, id := range s.TSDBStore.ShardIDs() {
-				if di, ok := deletedShardIDs[id]; ok {
-					if err := s.TSDBStore.DeleteShard(id); err != nil {
-						s.logger.Printf("failed to delete shard ID %d from database %s, retention policy %s: %s",
-							id, di.db, di.rp, err.Error())
-						continue
-					}
-					s.logger.Printf("shard ID %d from database %s, retention policy %s, deleted",
-						id, di.db, di.rp)
-				}
+	for _, id := range s.TSDBStore.ShardIDs() {
+		if di, ok := deletedShardIDs[id]; ok {
+			if err := s.TSDBStore.DeleteShard(id); err != nil {
+				s.logger.Printf("failed to delete shard ID %d from database %s, retention policy %s: %s",
+					id, di.db, di.rp, err.Error())
+				continue
 			}
+			s.logger.Printf("shard ID %d from database %s, retention policy %s, deleted",
+				id, di.db, di.rp)
 		}
 	}
 }

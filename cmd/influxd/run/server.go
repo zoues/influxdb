@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -78,7 +77,7 @@ type Server struct {
 	SnapshotterService *snapshotter.Service
 
 	Monitor  *monitor.Monitor
-	DebugMux http.Handler
+	DebugMux *debug.Mux
 
 	// Server reporting and registration
 	reportingDisabled bool
@@ -444,6 +443,10 @@ func (s *Server) Open() error {
 	for _, service := range s.Services {
 		if err := service.Open(); err != nil {
 			return fmt.Errorf("open service: %s", err)
+		}
+
+		if ds, ok := service.(debug.DebugService); ok {
+			s.DebugMux.AddDebugService(ds)
 		}
 	}
 

@@ -20,6 +20,13 @@ type Monitor interface {
 	Statistics(tags map[string]string) ([]*monitor.Statistic, error)
 }
 
+// DebugService provides a method to attach extra debug handlers to the underlying debug mux.
+// Most of the time, a service that defines AddDebugHandler will do so in a separate file
+// that depends on the debug build tag being set.
+type DebugService interface {
+	AddDebugHandler(pmux *pat.PatternServeMux)
+}
+
 // Mux contains all the handlers for any /debug endpoint.
 type Mux struct {
 	pmux    *pat.PatternServeMux
@@ -57,6 +64,11 @@ func NewMux(m Monitor) *Mux {
 // ServeHTTP implements the http.Handler interface.
 func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.pmux.ServeHTTP(w, r)
+}
+
+// AddDebugService adds the debug handler for the given DebugService.
+func (m *Mux) AddDebugService(ds DebugService) {
+	ds.AddDebugHandler(m.pmux)
 }
 
 // ServeError serves a JSON error.
