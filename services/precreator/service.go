@@ -18,6 +18,8 @@ type Service struct {
 	done chan struct{}
 	wg   sync.WaitGroup
 
+	forcePrecreate chan struct{}
+
 	MetaClient interface {
 		PrecreateShardGroups(now, cutoff time.Time) error
 	}
@@ -29,6 +31,8 @@ func NewService(c Config) (*Service, error) {
 		checkInterval: time.Duration(c.CheckInterval),
 		advancePeriod: time.Duration(c.AdvancePeriod),
 		Logger:        log.New(os.Stderr, "[shard-precreation] ", log.LstdFlags),
+
+		forcePrecreate: make(chan struct{}),
 	}
 
 	return &s, nil
@@ -52,7 +56,7 @@ func (s *Service) Open() error {
 	s.done = make(chan struct{})
 
 	s.wg.Add(1)
-	go s.runPrecreation()
+	go s.servicePrecreate()
 	return nil
 }
 
@@ -69,13 +73,20 @@ func (s *Service) Close() error {
 	return nil
 }
 
-// runPrecreation continually checks if resources need precreation.
-func (s *Service) runPrecreation() {
+// servicePrecreate continually checks if resources need precreation.
+func (s *Service) servicePrecreate() {
 	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.checkInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-time.After(s.checkInterval):
+		case <-s.forcePrecreate:
+			if err := s.precreate(time.Now().UTC()); err != nil {
+				s.Logger.Printf("failed to precreate shards: %s", err.Error())
+			}
+		case <-ticker.C:
 			if err := s.precreate(time.Now().UTC()); err != nil {
 				s.Logger.Printf("failed to precreate shards: %s", err.Error())
 			}
