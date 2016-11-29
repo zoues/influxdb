@@ -9,6 +9,7 @@
 - [#7368](https://github.com/influxdata/influxdb/pull/7368): Introduce syntax for marking a partial response with chunking.
 - [#7356](https://github.com/influxdata/influxdb/issues/7356): Use X-Forwarded-For IP address in HTTP logger if present.
 - [#7601](https://github.com/influxdata/influxdb/issues/7601): Prune data in meta store for deleted shards.
+- [#7154](https://github.com/influxdata/influxdb/pull/7154): Add msgpack handler for smart JSON encoding.
 
 ### Bugfixes
 
@@ -91,6 +92,9 @@ All Changes:
 ### Bugfixes
 
 - [#7392](https://github.com/influxdata/influxdb/pull/7392): Enable https subscriptions to work with custom CA certificates.
+
+### Bugfixes
+
 - [#1834](https://github.com/influxdata/influxdb/issues/1834): Drop time when used as a tag or field key.
 - [#7152](https://github.com/influxdata/influxdb/issues/7152): Decrement number of measurements only once when deleting the last series from a measurement.
 - [#7177](https://github.com/influxdata/influxdb/issues/7177): Fix base64 encoding issue with /debug/vars stats.

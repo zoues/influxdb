@@ -4,35 +4,37 @@ import (
 	"sort"
 )
 
+//go:generate msgp -io=true -marshal=false -o=encode.go
+
 // Row represents a single row returned from the execution of a statement.
 type Row struct {
-	Name    string            `json:"name,omitempty"`
-	Tags    map[string]string `json:"tags,omitempty"`
-	Columns []string          `json:"columns,omitempty"`
-	Values  [][]interface{}   `json:"values,omitempty"`
-	Partial bool              `json:"partial,omitempty"`
+	Name    string            `json:"name,omitempty" msg:"name,omitempty"`
+	Tags    map[string]string `json:"tags,omitempty" msg:"tags,omitempty"`
+	Columns []string          `json:"columns,omitempty" msg:"columns,omitempty"`
+	Values  [][]interface{}   `json:"values,omitempty" msg:"values,omitempty"`
+	Partial bool              `json:"partial,omitempty" msg:"values,omitempty"`
 }
 
 // SameSeries returns true if r contains values for the same series as o.
-func (r *Row) SameSeries(o *Row) bool {
-	return r.tagsHash() == o.tagsHash() && r.Name == o.Name
+func (z *Row) SameSeries(o *Row) bool {
+	return z.tagsHash() == o.tagsHash() && z.Name == o.Name
 }
 
 // tagsHash returns a hash of tag key/value pairs.
-func (r *Row) tagsHash() uint64 {
+func (z *Row) tagsHash() uint64 {
 	h := NewInlineFNV64a()
-	keys := r.tagsKeys()
+	keys := z.tagsKeys()
 	for _, k := range keys {
 		h.Write([]byte(k))
-		h.Write([]byte(r.Tags[k]))
+		h.Write([]byte(z.Tags[k]))
 	}
 	return h.Sum64()
 }
 
 // tagKeys returns a sorted list of tag keys.
-func (r *Row) tagsKeys() []string {
-	a := make([]string, 0, len(r.Tags))
-	for k := range r.Tags {
+func (z *Row) tagsKeys() []string {
+	a := make([]string, 0, len(z.Tags))
+	for k := range z.Tags {
 		a = append(a, k)
 	}
 	sort.Strings(a)
@@ -42,18 +44,18 @@ func (r *Row) tagsKeys() []string {
 // Rows represents a collection of rows. Rows implements sort.Interface.
 type Rows []*Row
 
-func (p Rows) Len() int { return len(p) }
+func (z Rows) Len() int { return len(z) }
 
-func (p Rows) Less(i, j int) bool {
+func (z Rows) Less(i, j int) bool {
 	// Sort by name first.
-	if p[i].Name != p[j].Name {
-		return p[i].Name < p[j].Name
+	if z[i].Name != z[j].Name {
+		return z[i].Name < z[j].Name
 	}
 
 	// Sort by tag set hash. Tags don't have a meaningful sort order so we
 	// just compute a hash and sort by that instead. This allows the tests
 	// to receive rows in a predictable order every time.
-	return p[i].tagsHash() < p[j].tagsHash()
+	return z[i].tagsHash() < z[j].tagsHash()
 }
 
-func (p Rows) Swap(i, j int) { p[i], p[j] = p[j], p[i] }
+func (z Rows) Swap(i, j int) { z[i], z[j] = z[j], z[i] }
