@@ -36,6 +36,7 @@ message IteratorOptions {
     optional string      Condition  = 8;
     optional int64       StartTime  = 9;
     optional int64       EndTime    = 10;
+    optional string      Location   = 18;
     optional bool        Ascending  = 11;
     optional int64       Limit      = 12;
     optional int64       Offset     = 13;

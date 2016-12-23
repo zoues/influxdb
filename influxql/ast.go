@@ -941,6 +941,9 @@ type SelectStatement struct {
 	// The value to fill empty aggregate buckets with, if any
 	FillValue interface{}
 
+	// The timezone for the query, if any.
+	Location *time.Location
+
 	// Renames the implicit time field name.
 	TimeAlias string
 
@@ -1485,6 +1488,9 @@ func (s *SelectStatement) String() string {
 	}
 	if s.SOffset > 0 {
 		_, _ = fmt.Fprintf(&buf, " SOFFSET %d", s.SOffset)
+	}
+	if s.Location != nil {
+		_, _ = fmt.Fprintf(&buf, ` TZ("%s")`, s.Location)
 	}
 	return buf.String()
 }

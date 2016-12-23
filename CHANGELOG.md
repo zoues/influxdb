@@ -1,3 +1,9 @@
+## v1.3.0 [unreleased]
+
+### Features
+
+- [#6541](https://github.com/influxdata/influxdb/issues/6541): Support timezone offsets for queries.
+
 ## v1.2.0 [unreleased]
 
 ### Release Notes
