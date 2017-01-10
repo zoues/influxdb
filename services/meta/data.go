@@ -1248,12 +1248,12 @@ func (sgi *ShardGroupInfo) marshal() *internal.ShardGroupInfo {
 // unmarshal deserializes from a protobuf representation.
 func (sgi *ShardGroupInfo) unmarshal(pb *internal.ShardGroupInfo) {
 	sgi.ID = pb.GetID()
-	sgi.StartTime = UnmarshalTime(pb.GetStartTime())
-	sgi.EndTime = UnmarshalTime(pb.GetEndTime())
-	sgi.DeletedAt = UnmarshalTime(pb.GetDeletedAt())
+	sgi.StartTime = UnmarshalTime(pb.GetStartTime(), true)
+	sgi.EndTime = UnmarshalTime(pb.GetEndTime(), true)
+	sgi.DeletedAt = UnmarshalTime(pb.GetDeletedAt(), false)
 
 	if pb != nil && pb.TruncatedAt != nil {
-		sgi.TruncatedAt = UnmarshalTime(pb.GetTruncatedAt())
+		sgi.TruncatedAt = UnmarshalTime(pb.GetTruncatedAt(), false)
 	}
 
 	if len(pb.GetShards()) > 0 {
@@ -1531,16 +1531,19 @@ func (leases *Leases) Acquire(name string, nodeID uint64) (*Lease, error) {
 
 // MarshalTime converts t to nanoseconds since epoch. A zero time returns 0.
 func MarshalTime(t time.Time) int64 {
-	if t.IsZero() {
+	if t.IsZero() || t.UTC() == time.Unix(0, 0).UTC() {
 		return 0
 	}
 	return t.UnixNano()
 }
 
 // UnmarshalTime converts nanoseconds since epoch to time.
-// A zero value returns a zero time.
-func UnmarshalTime(v int64) time.Time {
+// A zero value returns epoch time.
+func UnmarshalTime(v int64, defaultToEpoch bool) time.Time {
 	if v == 0 {
+		if defaultToEpoch {
+			return time.Unix(0, 0).UTC()
+		}
 		return time.Time{}
 	}
 	return time.Unix(0, v).UTC()
